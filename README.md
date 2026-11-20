@@ -1,6 +1,7 @@
 # DSH飞秋 · dsh-feiq-im
 
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![tests](https://github.com/jiangsuyuan/dsh-feiq-im/actions/workflows/test.yml/badge.svg)](https://github.com/jiangsuyuan/dsh-feiq-im/actions/workflows/test.yml)
 [![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)](package.json)
 
 给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的局域网即时通讯插件：**工作区右侧常驻气泡 + 未读角标 + 逐条送达/已读**，同网段自动发现、不需要加好友，并兼容**飞秋 / 飞鸽传书（IPMsg 协议）**。
