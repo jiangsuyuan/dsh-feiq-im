@@ -539,10 +539,10 @@ window.__ModuleLoader__.load({
       }
 
       const listView = () => {
-        const unread = convs.filter((conv) => conv.unread > 0)
-        const recent = convs.filter((conv) => !conv.unread && conv.lastAt)
-        const shown = new Set([...unread, ...recent].map((conv) => conv.key))
-        const idle = peers.filter((peer) => peer.online && !shown.has(peer.key))
+        const onlineKeys = new Set(peers.filter((peer) => peer.online).map((peer) => peer.key))
+        const unread = convs.filter((conv) => conv.unread > 0 && !onlineKeys.has(conv.key))
+        const recent = convs.filter((conv) => conv.lastAt && !conv.unread && !onlineKeys.has(conv.key))
+        const idle = peers.filter((peer) => peer.online)
         return h(
           'div',
           { className: 'fq-body' },
@@ -551,18 +551,21 @@ window.__ModuleLoader__.load({
           idle.length
             ? h('div', { className: 'fq-section' }, '在线列表 · ' + idle.length)
             : null,
-          ...idle.map((peer) =>
-            h(
+          ...idle.map((peer) => {
+            const conv = convs.find((item) => item.key === peer.key)
+            return h(
               'div',
               { className: 'fq-row', key: peer.key, onClick: () => openChat(peer.key) },
               h(FqAvatar, { name: peer.displayName || peer.nick || peer.key, avatar: peer.avatar, size: 32 }),
               h('div', { className: 'fq-row-main' },
                 h('div', { className: 'fq-name' }, peer.displayName || peer.nick || peer.key),
-                h('div', { className: 'fq-snippet' }, (peer.displayName ? peer.nick + ' · ' : '') + (peer.ip || '在线')),
+                h('div', { className: 'fq-snippet' }, conv?.lastText || (peer.displayName ? peer.nick + ' · ' : '') + (peer.ip || '在线')),
               ),
-              h('div', { className: 'fq-dot' }),
-            ),
-          ),
+              conv?.unread
+                ? h('div', { className: 'fq-count' }, conv.unread > 99 ? '99+' : conv.unread)
+                : h('div', { className: 'fq-dot' }),
+            )
+          }),
           recent.length
             ? h(
                 'div',
