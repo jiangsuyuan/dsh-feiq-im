@@ -47,6 +47,8 @@
 dsh plugin --profile desktop add github:<your-github-user>/dsh-feiq-im
 ```
 
+（把 `<your-github-user>` 换成你的 GitHub 用户名。）
+
 或本地目录安装：**Plugins → Add plugin → 选择本目录**，启用后重启 DSH。
 
 安装后工作区右侧出现 `DSH飞秋` 气泡；若提示 2425 被占用，点横幅里的「关闭飞秋并启用」。
