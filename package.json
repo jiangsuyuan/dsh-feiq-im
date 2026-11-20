@@ -35,6 +35,14 @@
   "scripts": {
     "test": "node test/ipmsg.test.mjs && node test/feiq-image.test.mjs && node test/app.test.mjs"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jiangsuyuan/dsh-feiq-im.git"
+  },
+  "homepage": "https://github.com/jiangsuyuan/dsh-feiq-im#readme",
+  "bugs": {
+    "url": "https://github.com/jiangsuyuan/dsh-feiq-im/issues"
+  },
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -46,6 +54,6 @@
     "instant-messaging",
     "windows"
   ],
-  "author": "dsh-feiq-im contributors",
+  "author": "jiangsuyuan",
   "license": "MIT"
 }

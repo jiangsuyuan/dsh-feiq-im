@@ -44,10 +44,8 @@
 从 GitHub 安装：
 
 ```bash
-dsh plugin --profile desktop add github:<your-github-user>/dsh-feiq-im
+dsh plugin --profile desktop add github:jiangsuyuan/dsh-feiq-im
 ```
-
-（把 `<your-github-user>` 换成你的 GitHub 用户名。）
 
 或本地目录安装：**Plugins → Add plugin → 选择本目录**，启用后重启 DSH。
 
