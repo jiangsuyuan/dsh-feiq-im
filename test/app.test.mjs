@@ -6,7 +6,7 @@ import path from 'node:path'
 
 import { Store } from '../src/host/store.js'
 import { FeiqApp } from '../src/host/app.js'
-import { COMMAND, parsePacket } from '../src/host/ipmsg.js'
+import { COMMAND, buildPacket, parsePacket } from '../src/host/ipmsg.js'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -99,6 +99,25 @@ test('image send exposes chunk progress and can be canceled', async () => {
   } finally {
     app.stop()
   }
+})
+
+test('avatar profile packets are exchanged between plugin peers', () => {
+  const app = new FeiqApp({ config: { nick: 'A' }, store: tempStore('avatar') })
+  const packet = buildPacket({
+    feiqHeader: '1',
+    packetNo: '1',
+    user: 'B',
+    host: 'B-PC',
+    command: 0xe1,
+    extra: 'avatar:fish-2',
+  })
+  app.handlePacket(packet, { address: '127.0.0.1', port: 25262 })
+  assert.equal(app.peers.get('B@B-PC').avatar, 'fish-2')
+  assert.equal(app.snapshot().peers[0].avatar, 'fish-2')
+
+  app.setSettings({ avatar: 'fish-3' })
+  assert.equal(app.avatar, 'fish-3')
+  assert.equal(app.snapshot().self.avatar, 'fish-3')
 })
 
 test('persisted receipt status overrides a stored "sending" record', () => {

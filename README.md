@@ -23,6 +23,7 @@
 | 图片 | 512 字节 UDP 分片、确认与超时补发、点击放大 |
 | 文件 | 报价 + TCP `GETFILEDATA`，带接收进度与取消 |
 | 未读角标 | 气泡总数、会话行数字、头像栏角标 |
+| 头像 | 设置里可选 6 只「大肥鱼」头像或默认首字；仅 dsh-feiq-im 之间可见 |
 | 可拖动气泡 | 位置与面板尺寸记忆；面板打开时气泡隐藏，关闭后回到原位 |
 | 2425 体检 | 被飞秋占用时提示，可一键关闭飞秋并重启监听 |
 
@@ -36,6 +37,7 @@
 
 - 测试基线：Windows + DSH Desktop `0.2.2-rc.5`，飞秋 3.0.0.1。
 - 不实现飞秋的加密会话：本插件不发布公钥，因此双方保持明文（已实测）。
+- 自定义头像通过私有 `0xE1` 报文交换，**只有同样装了 dsh-feiq-im 的对端能看到**；飞秋 / 飞鸽显示账号名与首字头像。
 - 群聊、文件夹传输、远程协助不在当前版本。
 
 ## 安装
@@ -59,6 +61,7 @@ dsh plugin --profile desktop add github:jiangsuyuan/dsh-feiq-im
 3. 输入框支持 `Enter` 发送、`Shift+Enter` 换行、`Ctrl+V` 粘贴截图。
 4. 点图片可放大；文件卡片显示进度和取消；失败的消息可点击重试。
 5. 会话头部：返回、头像、在线状态、**抖动**、关闭。
+6. 设置（⚙）里可以改昵称、切换入口位置（浮动气泡 / 输入框按钮）、选「大肥鱼」头像。
 
 ## 与飞秋同机共存
 
@@ -89,7 +92,7 @@ dsh plugin --profile desktop add github:jiangsuyuan/dsh-feiq-im
 ```bash
 node test/ipmsg.test.mjs        # 报文编解码（20）
 node test/feiq-image.test.mjs   # 图片分片（8）
-node test/app.test.mjs          # 引擎：文本/回执/抖动/文件/进度（7）
+node test/app.test.mjs          # 引擎：文本/回执/抖动/文件/头像（8）
 ```
 
 仓库结构：

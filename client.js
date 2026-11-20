@@ -82,6 +82,10 @@ window.__ModuleLoader__.load({
       '.fq-option{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);border-radius:8px;padding:6px 10px;font-size:11px;cursor:pointer}',
       '.fq-option:hover{color:var(--dsw-alias-label-primary)}',
       '.fq-option.active{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);background:transparent}',
+      '.fq-avatar-grid{display:flex;flex-wrap:wrap;gap:8px}',
+      '.fq-avatar-option{border:2px solid transparent;border-radius:50%;background:transparent;padding:0;line-height:0;cursor:pointer}',
+      '.fq-avatar-option:hover{border-color:var(--dsw-alias-border-l2)}',
+      '.fq-avatar-option.active{border-color:var(--dsw-alias-brand-primary)}',
       '.fq-settings{display:flex;flex-direction:column;gap:10px;padding:14px 12px}',
       '.fq-banner{font-size:11px;padding:8px 12px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}',
     ].join('\n')
@@ -123,7 +127,38 @@ window.__ModuleLoader__.load({
       return AVATAR_COLORS[hash % AVATAR_COLORS.length]
     }
 
-    function FqAvatar({ name, size = 30 }) {
+    // Built-in avatar set ("fat fish" pack). Only exchanged between dsh-feiq-im
+    // peers via the private 0xE1 profile packet; FeiQ itself does not render it.
+    const FISH = {
+      'fish-1': { bg: '#fff4e5', body: '#f2a33a', fin: '#e08b22', name: '胖胖鱼' },
+      'fish-2': { bg: '#eaf2ff', body: '#5aa6f0', fin: '#3b82d6', name: '泡泡鱼' },
+      'fish-3': { bg: '#ffe9ef', body: '#f06b8a', fin: '#d64d6f', name: '锦鲤' },
+      'fish-4': { bg: '#eafaf0', body: '#48b57b', fin: '#2f9463', name: '河豚' },
+      'fish-5': { bg: '#f3ecff', body: '#8b6cf0', fin: '#7050d8', name: '小丑鱼' },
+      'fish-6': { bg: '#e8f7fb', body: '#2fa8c4', fin: '#1f8aa3', name: '蓝鲸鱼' },
+    }
+
+    function FishAvatar({ id, size = 30 }) {
+      const fish = FISH[id] ?? FISH['fish-1']
+      return h(
+        'div',
+        { className: 'fq-avatar', style: { width: size, height: size, background: fish.bg } },
+        h(
+          'svg',
+          { width: Math.round(size * 0.86), height: Math.round(size * 0.86), viewBox: '0 0 40 40', 'aria-hidden': true },
+          h('ellipse', { cx: 21, cy: 21, rx: 13, ry: 10, fill: fish.body }),
+          h('path', { d: 'M8 21 L2 14 L2 28 Z', fill: fish.fin }),
+          h('path', { d: 'M18 11 L22 5 L27 12 Z', fill: fish.fin }),
+          h('circle', { cx: 29, cy: 18, r: 2.4, fill: '#1f2328' }),
+          h('circle', { cx: 29.8, cy: 17.2, r: 0.8, fill: '#ffffff' }),
+          h('path', { d: 'M30 24 q3 1 4 -1', stroke: fish.fin, strokeWidth: 1.4, fill: 'none', strokeLinecap: 'round' }),
+          h('circle', { cx: 24, cy: 25, r: 1.6, fill: fish.fin, opacity: 0.35 }),
+        ),
+      )
+    }
+
+    function FqAvatar({ name, avatar, size = 30 }) {
+      if (avatar && FISH[avatar]) return h(FishAvatar, { id: avatar, size })
       return h(
         'div',
         {
@@ -492,7 +527,7 @@ window.__ModuleLoader__.load({
         return h(
           'div',
           { className: 'fq-row', key: conv.key, onClick: () => openChat(conv.key) },
-          h(FqAvatar, { name: conv.displayName || conv.nick || conv.key, size: 32 }),
+          h(FqAvatar, { name: conv.displayName || conv.nick || conv.key, avatar: conv.avatar, size: 32 }),
           h(
             'div',
             { className: 'fq-row-main' },
@@ -520,7 +555,7 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { className: 'fq-row', key: peer.key, onClick: () => openChat(peer.key) },
-              h(FqAvatar, { name: peer.displayName || peer.nick || peer.key, size: 32 }),
+              h(FqAvatar, { name: peer.displayName || peer.nick || peer.key, avatar: peer.avatar, size: 32 }),
               h('div', { className: 'fq-row-main' },
                 h('div', { className: 'fq-name' }, peer.displayName || peer.nick || peer.key),
                 h('div', { className: 'fq-snippet' }, (peer.displayName ? peer.nick + ' · ' : '') + (peer.ip || '在线')),
@@ -570,7 +605,7 @@ window.__ModuleLoader__.load({
                   title: name,
                   onClick: () => openChat(person.key),
                 },
-                h(FqAvatar, { name, size: 36 }),
+                h(FqAvatar, { name, avatar: person.avatar, size: 36 }),
                 count ? h('span', { className: 'fq-avatar-badge' }, count > 99 ? '99+' : String(count)) : null,
               )
             }),
@@ -582,7 +617,7 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'fq-head' },
             h('button', { className: 'fq-iconbtn', onClick: () => setActive(null), title: '返回' }, h(Icon, { name: 'back' })),
-            h(FqAvatar, { name: title, size: 30 }),
+            h(FqAvatar, { name: title, avatar: peer?.avatar, size: 30 }),
             h('div', { style: { minWidth: 0 } },
               h('div', { className: 'fq-title' }, title),
               h('div', { className: 'fq-muted' }, peer?.online ? '在线 · ' + (peer.ip || '') : '离线'),
@@ -684,7 +719,7 @@ window.__ModuleLoader__.load({
                   ? h(
                       'div',
                       { style: { display: 'flex', gap: 8, alignItems: 'flex-start' } },
-                      h(FqAvatar, { name: peer?.displayName || peer?.nick || title, size: 26 }),
+                      h(FqAvatar, { name: peer?.displayName || peer?.nick || title, avatar: peer?.avatar, size: 26 }),
                       h('div', { style: { minWidth: 0 } }, body, progress),
                     )
                   : h('div', null, body, progress),
@@ -759,6 +794,12 @@ window.__ModuleLoader__.load({
         bridge.set({ mode })
       }
 
+      const saveAvatar = (avatar) => {
+        post('/api/settings', { avatar })
+          .then((next) => setSnap(next))
+          .catch(() => {})
+      }
+
       const settingsView = () => {
         const nick = snap?.self?.nick ?? ''
         if (nickDraft === '' || nickDraft === snap?.self?.nick) {
@@ -795,6 +836,32 @@ window.__ModuleLoader__.load({
             { className: 'fq-muted' },
             bridged.mode === 'composer' ? '输入框工具行里的按钮，带红色未读角标' : '会话区左侧、输入框上方的浮动气泡',
           ),
+          h('div', { className: 'fq-muted', style: { marginTop: 6 } }, '头像（仅 dsh-feiq-im 之间可见）'),
+          h(
+            'div',
+            { className: 'fq-avatar-grid' },
+            h(
+              'button',
+              {
+                className: 'fq-avatar-option' + ((snap?.self?.avatar ?? 'initial') === 'initial' ? ' active' : ''),
+                title: '默认（名字首字）',
+                onClick: () => saveAvatar('initial'),
+              },
+              h(FqAvatar, { name: nick, size: 34 }),
+            ),
+            ...Object.keys(FISH).map((id) =>
+              h(
+                'button',
+                {
+                  key: id,
+                  className: 'fq-avatar-option' + (snap?.self?.avatar === id ? ' active' : ''),
+                  title: FISH[id].name,
+                  onClick: () => saveAvatar(id),
+                },
+                h(FishAvatar, { id, size: 34 }),
+              ),
+            ),
+          ),
           h('button', { className: 'fq-linkbtn', onClick: () => setSettingsOpen(false) }, '返回'),
           h('button', { className: 'fq-iconbtn', title: '关闭', onClick: () => setOpen(false) }, h(Icon, { name: 'close' })),
         )
@@ -821,6 +888,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'fq-foot' },
+            h(FqAvatar, { name: snap?.self?.nick ?? '', avatar: snap?.self?.avatar, size: 20 }),
             h('div', null, '我 · ' + (snap?.self?.nick ?? '') + ' · ' + (snap?.self?.ip ?? '')),
           ),
         )

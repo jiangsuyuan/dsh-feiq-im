@@ -43,6 +43,7 @@ export class FeiqApp extends EventEmitter {
     this.store = store ?? new Store(resolveDataDir(config))
     this.port = Number(config.ipmsgPort ?? 2425)
     this.nick = String(config.nick || '') || os.hostname() || 'DSH'
+    this.avatar = String(config.avatar || 'initial')
     this.hostName = os.hostname() || 'DSH'
     this.mac = String(config.mac || primaryMac())
     this.localIp = primaryAddress()
@@ -185,6 +186,7 @@ export class FeiqApp extends EventEmitter {
     const saved = this.store.loadState()
     if (!saved) return
     if (saved.settings?.nick && !this.config.nick) this.nick = saved.settings.nick
+    if (saved.settings?.avatar) this.avatar = saved.settings.avatar
     for (const peer of saved.peers ?? []) {
       if (peer?.key) this.peers.set(peer.key, { ...peer, online: false, lastSeen: 0 })
     }
@@ -202,7 +204,7 @@ export class FeiqApp extends EventEmitter {
     const write = () => {
       this.persistTimer = null
       this.store.saveState({
-        settings: { nick: this.nick },
+        settings: { nick: this.nick, avatar: this.avatar },
         peers: [...this.peers.values()],
         convs: [...this.convs.values()],
         seq: Object.fromEntries(this.seq),
@@ -233,7 +235,34 @@ export class FeiqApp extends EventEmitter {
   announce() {
     if (!this.socket) return
     const packet = this.entryPacket()
-    for (const address of broadcastAddresses()) this.send(packet, { address, port: this.port })
+    const profile = buildPacket({
+      feiqHeader: this.ver,
+      packetNo: String(++this.packetNo),
+      user: this.nick,
+      host: this.hostName,
+      command: 0xe1,
+      extra: 'avatar:' + this.avatar,
+    })
+    for (const address of broadcastAddresses()) {
+      this.send(packet, { address, port: this.port })
+      this.send(profile, { address, port: this.port })
+    }
+  }
+
+  /** Private extension: tell peers our avatar, ignored by FeiQ. */
+  sendProfile(target) {
+    if (!this.socket) return
+    this.send(
+      buildPacket({
+        feiqHeader: this.ver,
+        packetNo: String(++this.packetNo),
+        user: this.nick,
+        host: this.hostName,
+        command: 0xe1,
+        extra: 'avatar:' + this.avatar,
+      }),
+      target,
+    )
   }
 
   send(buffer, target) {
@@ -269,6 +298,7 @@ export class FeiqApp extends EventEmitter {
           rinfo,
         )
       }
+      this.sendProfile(rinfo)
       return
     }
     if (mode === COMMAND.BR_EXIT) {
@@ -284,6 +314,16 @@ export class FeiqApp extends EventEmitter {
     if (mode === COMMAND.SENDMSG) return this.onSendMsg(packet, rinfo)
     if (mode === COMMAND.RECVMSG) return this.onReceipt(packet, 'delivered')
     if (mode === COMMAND.READMSG) return this.onReceipt(packet, 'read')
+    if (mode === 0xe1) {
+      const match = /^avatar:([a-z0-9-]{1,24})$/i.exec(packet.text)
+      const peer = this.upsertPeer(packet, rinfo)
+      if (match && peer.avatar !== match[1]) {
+        peer.avatar = match[1]
+        this.scheduleState()
+        this.persist()
+      }
+      return
+    }
     if (mode === COMMAND.KNOCK) {
       this.emit('knock', { peerKey: this.peerKey(packet), nick: packet.user })
       this.send(
@@ -1038,12 +1078,25 @@ export class FeiqApp extends EventEmitter {
       .map((conv) => {
         this.ensureLoaded(conv.key)
         const peer = this.peers.get(conv.key)
-        return { ...conv, nick: peer?.nick ?? conv.key, displayName: peer?.displayName ?? '', online: Boolean(peer?.online) }
+        return {
+          ...conv,
+          nick: peer?.nick ?? conv.key,
+          displayName: peer?.displayName ?? '',
+          avatar: peer?.avatar ?? '',
+          online: Boolean(peer?.online),
+        }
       })
       .sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0))
     const unreadTotal = convs.reduce((sum, conv) => sum + (conv.unread || 0), 0)
     return {
-      self: { nick: this.nick, host: this.hostName, ip: this.localIp, mac: this.mac, port: this.port },
+      self: {
+        nick: this.nick,
+        avatar: this.avatar,
+        host: this.hostName,
+        ip: this.localIp,
+        mac: this.mac,
+        port: this.port,
+      },
       status: { ...this.status },
       unreadTotal,
       peers,
@@ -1059,6 +1112,11 @@ export class FeiqApp extends EventEmitter {
   setSettings(patch = {}) {
     if (typeof patch.nick === 'string' && patch.nick.trim() !== '') {
       this.nick = patch.nick.trim()
+      this.persist(true)
+      this.announce()
+    }
+    if (typeof patch.avatar === 'string' && /^[a-z0-9-]{1,24}$/i.test(patch.avatar)) {
+      this.avatar = patch.avatar
       this.persist(true)
       this.announce()
     }
