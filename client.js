@@ -79,6 +79,9 @@ window.__ModuleLoader__.load({
       '.fq-empty{font-size:12px;color:var(--dsw-alias-label-secondary);text-align:center;padding:28px 12px;line-height:1.7}',
       '.fq-foot{display:flex;gap:8px;align-items:center;padding:8px 12px;border-top:1px solid var(--dsw-alias-border-l1);font-size:10px;color:var(--dsw-alias-label-secondary)}',
       '.fq-nick{width:100%;box-sizing:border-box;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-size:12px;padding:8px}',
+      '.fq-option{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);border-radius:8px;padding:6px 10px;font-size:11px;cursor:pointer}',
+      '.fq-option:hover{color:var(--dsw-alias-label-primary)}',
+      '.fq-option.active{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);background:transparent}',
       '.fq-settings{display:flex;flex-direction:column;gap:10px;padding:14px 12px}',
       '.fq-banner{font-size:11px;padding:8px 12px;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary)}',
     ].join('\n')
@@ -177,6 +180,13 @@ window.__ModuleLoader__.load({
       unread: 0,
       dock: false,
       dockRect: null,
+      mode: (() => {
+        try {
+          return localStorage.getItem('dsh-feiq-im.entry') === 'composer' ? 'composer' : 'float'
+        } catch {
+          return 'float'
+        }
+      })(),
       listeners: new Set(),
       subscribe(listener) {
         this.listeners.add(listener)
@@ -201,13 +211,18 @@ window.__ModuleLoader__.load({
         if (ref.current) bridge.set({ dock: true, dockRect: ref.current.getBoundingClientRect() })
       }
       useEffect(() => {
+        if (state.mode !== 'composer') {
+          if (bridge.dock || bridge.dockRect) bridge.set({ dock: false, dockRect: null })
+          return undefined
+        }
         report()
         window.addEventListener('resize', report)
         return () => {
           window.removeEventListener('resize', report)
           bridge.set({ dock: false, dockRect: null })
         }
-      }, [])
+      }, [state.mode])
+      if (state.mode !== 'composer') return null
       return h(
         'button',
         {
@@ -248,12 +263,12 @@ window.__ModuleLoader__.load({
       const dragRef = useRef(null)
       const [pos, setPos] = useState(() => {
         try {
-          const saved = JSON.parse(localStorage.getItem('dsh-feiq-im.pos') || 'null')
+          const saved = JSON.parse(localStorage.getItem('dsh-feiq-im.pos.v2') || 'null')
           if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) return saved
         } catch {
           /* ignore broken storage */
         }
-        return { x: Math.max(8, window.innerWidth - 64), y: Math.max(8, window.innerHeight / 2 - 24) }
+        return { x: 296, y: Math.max(8, window.innerHeight - 200) }
       })
       const [size, setSize] = useState(() => {
         try {
@@ -735,6 +750,15 @@ window.__ModuleLoader__.load({
         )
       }
 
+      const setEntryMode = (mode) => {
+        try {
+          localStorage.setItem('dsh-feiq-im.entry', mode)
+        } catch {
+          /* storage may be unavailable */
+        }
+        bridge.set({ mode })
+      }
+
       const settingsView = () => {
         const nick = snap?.self?.nick ?? ''
         if (nickDraft === '' || nickDraft === snap?.self?.nick) {
@@ -759,6 +783,18 @@ window.__ModuleLoader__.load({
               setSettingsOpen(false)
             },
           }, '保存'),
+          h('div', { className: 'fq-muted', style: { marginTop: 6 } }, '入口位置'),
+          h(
+            'div',
+            { style: { display: 'flex', gap: 8 } },
+            h('button', { className: 'fq-option' + (bridged.mode === 'float' ? ' active' : ''), onClick: () => setEntryMode('float') }, '浮动气泡'),
+            h('button', { className: 'fq-option' + (bridged.mode === 'composer' ? ' active' : ''), onClick: () => setEntryMode('composer') }, '输入框按钮'),
+          ),
+          h(
+            'div',
+            { className: 'fq-muted' },
+            bridged.mode === 'composer' ? '输入框工具行里的按钮，带红色未读角标' : '会话区左侧、输入框上方的浮动气泡',
+          ),
           h('button', { className: 'fq-linkbtn', onClick: () => setSettingsOpen(false) }, '返回'),
           h('button', { className: 'fq-iconbtn', title: '关闭', onClick: () => setOpen(false) }, h(Icon, { name: 'close' })),
         )
@@ -850,7 +886,7 @@ window.__ModuleLoader__.load({
           return
         }
         try {
-          localStorage.setItem('dsh-feiq-im.pos', JSON.stringify(pos))
+          localStorage.setItem('dsh-feiq-im.pos.v2', JSON.stringify(pos))
         } catch {
           /* storage may be unavailable */
         }
