@@ -66,6 +66,9 @@ window.__ModuleLoader__.load({
       '.fq-progress-row{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:10px;color:var(--dsw-alias-label-secondary)}',
       '.fq-lightbox{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;cursor:zoom-out}',
       '.fq-lightbox-img{max-width:88vw;max-height:88vh;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.5)}',
+      '.fq-trigger{position:relative;width:26px;height:26px;border-radius:6px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}',
+      '.fq-trigger:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary)}',
+      '.fq-trigger-badge{position:absolute;top:-5px;right:-5px;min-width:15px;height:15px;border-radius:8px;background:var(--dsw-alias-state-error-primary);color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px;border:1.5px solid var(--dsw-alias-bg-overlay)}',
       '.fq-resize{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;border-right:2px solid var(--dsw-alias-border-l2);border-bottom:2px solid var(--dsw-alias-border-l2);border-bottom-right-radius:12px;opacity:.65;touch-action:none}',
       '.fq-resize:hover{opacity:1}',
       '.fq-compose{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--dsw-alias-border-l1);align-items:flex-end;flex:0 0 auto}',
@@ -159,9 +162,77 @@ window.__ModuleLoader__.load({
       return null
     }
 
+    function ChatIcon({ size = 18 }) {
+      return h(
+        'svg',
+        { width: size, height: size, viewBox: '0 0 24 24', fill: 'currentColor', 'aria-hidden': true },
+        h('path', { d: 'M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z' }),
+      )
+    }
+
+    // Shared state between the composer trigger and the overlay panel: they are
+    // rendered into two different slots, so React context cannot reach across.
+    const bridge = {
+      open: false,
+      unread: 0,
+      dock: false,
+      dockRect: null,
+      listeners: new Set(),
+      subscribe(listener) {
+        this.listeners.add(listener)
+        return () => this.listeners.delete(listener)
+      },
+      set(patch) {
+        Object.assign(this, patch)
+        for (const listener of this.listeners) listener()
+      },
+    }
+
+    function useBridge() {
+      const [, force] = useState(0)
+      useEffect(() => bridge.subscribe(() => force((value) => value + 1)), [])
+      return bridge
+    }
+
+    function ComposerTrigger() {
+      const state = useBridge()
+      const ref = useRef(null)
+      const report = () => {
+        if (ref.current) bridge.set({ dock: true, dockRect: ref.current.getBoundingClientRect() })
+      }
+      useEffect(() => {
+        report()
+        window.addEventListener('resize', report)
+        return () => {
+          window.removeEventListener('resize', report)
+          bridge.set({ dock: false, dockRect: null })
+        }
+      }, [])
+      return h(
+        'button',
+        {
+          ref,
+          type: 'button',
+          className: 'fq-trigger',
+          title: 'DSH飞秋' + (state.unread ? ' · ' + state.unread + ' 条未读' : ''),
+          'aria-label': 'DSH飞秋',
+          onClick: () => {
+            report()
+            bridge.set({ open: !bridge.open })
+          },
+        },
+        h(ChatIcon, { size: 18 }),
+        state.unread
+          ? h('span', { className: 'fq-trigger-badge' }, state.unread > 99 ? '99+' : String(state.unread))
+          : null,
+      )
+    }
+
     function FeiqBubble() {
       const [snap, setSnap] = useState(null)
-      const [open, setOpen] = useState(false)
+      const bridged = useBridge()
+      const open = bridged.open
+      const setOpen = (value) => bridge.set({ open: typeof value === 'function' ? value(bridge.open) : value })
       const [active, setActive] = useState(null)
       const [messages, setMessages] = useState({})
       const [draft, setDraft] = useState('')
@@ -285,6 +356,10 @@ window.__ModuleLoader__.load({
       const peers = snap?.peers ?? []
       const unreadTotal = snap?.unreadTotal ?? 0
       const onlineCount = peers.filter((peer) => peer.online).length
+
+      useEffect(() => {
+        if (bridge.unread !== unreadTotal) bridge.set({ unread: unreadTotal })
+      }, [unreadTotal])
 
       const openChat = (convId) => {
         setActive(convId)
@@ -718,16 +793,27 @@ window.__ModuleLoader__.load({
       const BUBBLE = 48
       const PANEL_W = Math.min(Math.max(360, size.w), Math.max(360, window.innerWidth - 24))
       const panelHeight = Math.min(Math.max(420, size.h), Math.max(420, window.innerHeight - 24))
+      const dockRect = bridged.dock && bridged.dockRect ? bridged.dockRect : null
       const spaceRight = window.innerWidth - (pos.x + BUBBLE)
       const openLeft = spaceRight < PANEL_W + 16
-      const panelLeft = Math.min(
-        Math.max(8, openLeft ? pos.x + BUBBLE - PANEL_W : pos.x),
-        Math.max(8, window.innerWidth - PANEL_W - 8),
-      )
-      const panelTop = Math.min(
-        Math.max(8, pos.y + BUBBLE / 2 - panelHeight / 2),
-        Math.max(8, window.innerHeight - panelHeight - 8),
-      )
+      let panelLeft
+      let panelTop
+      if (dockRect) {
+        panelLeft = Math.min(
+          Math.max(8, dockRect.left),
+          Math.max(8, window.innerWidth - PANEL_W - 8),
+        )
+        panelTop = Math.max(8, dockRect.top - panelHeight - 12)
+      } else {
+        panelLeft = Math.min(
+          Math.max(8, openLeft ? pos.x + BUBBLE - PANEL_W : pos.x),
+          Math.max(8, window.innerWidth - PANEL_W - 8),
+        )
+        panelTop = Math.min(
+          Math.max(8, pos.y + BUBBLE / 2 - panelHeight / 2),
+          Math.max(8, window.innerHeight - panelHeight - 8),
+        )
+      }
 
       const startDrag = (event) => {
         if (event.pointerType === 'mouse' && event.button !== 0) return
@@ -849,7 +935,7 @@ window.__ModuleLoader__.load({
             )
           : null,
         panel,
-        !open
+        !open && !dockRect
           ? h(
           'button',
           {
@@ -888,6 +974,12 @@ window.__ModuleLoader__.load({
           slots.register(
             { name: 'shell.overlay', id: 'dsh-feiq-im-bubble', order: 890, label: 'DSH飞秋' },
             FeiqBubble,
+          ),
+        )
+        slots.inject('conversation.input.left', () =>
+          slots.register(
+            { name: 'conversation.input.left', id: 'dsh-feiq-im-trigger', order: 30, label: 'DSH飞秋' },
+            ComposerTrigger,
           ),
         )
       },
