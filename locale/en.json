@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "FeiQ-style LAN chat",
+    "description": "A resident bubble in the work area with unread badge and per-message delivered/read ticks; zero-setup discovery, compatible with FeiQ / IPMsg.",
+    "detail": "docs/DETAIL.md"
+  }
+}

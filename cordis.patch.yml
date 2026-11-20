@@ -1,0 +1,9 @@
+- insert:
+    - id: feiq-im
+      name: dsh-feiq-im
+      config:
+        ipmsgPort: 2425
+        nick: ''
+        announceMs: 10000
+        rosterTtlMs: 30000
+        dataDir: ''

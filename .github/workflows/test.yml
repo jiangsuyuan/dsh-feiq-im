@@ -1,0 +1,20 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Codec tests
+        run: node test/ipmsg.test.mjs
+      - name: Image tests
+        run: node test/feiq-image.test.mjs
+      - name: Engine tests
+        run: node test/app.test.mjs

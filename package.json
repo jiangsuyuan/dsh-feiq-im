@@ -1,0 +1,51 @@
+{
+  "name": "dsh-feiq-im",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH 局域网即时通讯插件：常驻气泡 + 未读角标 + 送达/已读，兼容飞秋 / 飞鸽（IPMsg）",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "src",
+    "locale/*.json",
+    "cordis.patch.yml",
+    "docs",
+    "icon.svg",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node test/ipmsg.test.mjs && node test/feiq-image.test.mjs && node test/app.test.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "feiq",
+    "ipmsg",
+    "lan",
+    "chat",
+    "instant-messaging",
+    "windows"
+  ],
+  "author": "dsh-feiq-im contributors",
+  "license": "MIT"
+}

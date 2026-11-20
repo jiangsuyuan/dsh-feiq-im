@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "DSH飞秋",
+    "description": "工作区右侧可拖动的常驻气泡，未读红点角标，逐条送达/已读；同网段零添加自动发现，兼容飞秋 / 飞鸽（IPMsg）。",
+    "detail": "docs/DETAIL.md"
+  }
+}

@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# local run data / captures
+captures/
+*.log
+*.pcapng
+*.csv
+
+# build output
+release/
+debug/
+dist/
+*.user
+.vs/
+
+# OS noise
+.DS_Store
+Thumbs.db
