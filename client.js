@@ -362,6 +362,26 @@ window.__ModuleLoader__.load({
       }, [])
 
       useEffect(() => {
+        if (!active) return undefined
+        const live = (messages[active] ?? []).some(
+          (item) => item.status === 'receiving' || item.status === 'sending',
+        )
+        if (!live) return undefined
+        // Belt and braces: if an SSE progress frame is missed (or the stream is
+        // stale), keep the transfer percentage and final status fresh.
+        const timer = setInterval(() => {
+          fetch(API + '/api/history?convId=' + encodeURIComponent(active) + '&limit=200', { cache: 'no-store' })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+              if (!data || activeRef.current !== active) return
+              setMessages((prev) => ({ ...prev, [active]: data.messages }))
+            })
+            .catch(() => {})
+        }, 800)
+        return () => clearInterval(timer)
+      }, [active, messages])
+
+      useEffect(() => {
         if (!open) return undefined
         const onKey = (event) => {
           if (event.key === 'Escape') {
