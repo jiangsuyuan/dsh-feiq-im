@@ -1028,6 +1028,28 @@ export class FeiqApp extends EventEmitter {
     return this.filePaths.get(messageId) ?? null
   }
 
+  /** Copy a received file into the OS Downloads folder so the browser can just say where it went. */
+  exportFile(messageId, name) {
+    const source = this.filePathFor(messageId)
+    if (!source || !fs.existsSync(source)) return null
+    const downloads = path.join(os.homedir(), 'Downloads')
+    fs.mkdirSync(downloads, { recursive: true })
+    const base = path
+      .basename(String(name || path.basename(source)))
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+      .slice(0, 180) || 'file.bin'
+    const ext = path.extname(base)
+    const stem = path.basename(base, ext)
+    let target = path.join(downloads, base)
+    let index = 1
+    while (fs.existsSync(target)) {
+      target = path.join(downloads, stem + ' (' + index + ')' + ext)
+      index += 1
+    }
+    fs.copyFileSync(source, target)
+    return target
+  }
+
   /* ------------------------------------------------------------------ */
   /* conversations                                                       */
   /* ------------------------------------------------------------------ */

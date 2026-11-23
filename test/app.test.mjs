@@ -147,6 +147,23 @@ test('TCP file serving accepts a FeiQ-style request without a trailing NUL', asy
   }
 })
 
+test('exportFile copies a received file into Downloads', () => {
+  const store = tempStore('export')
+  store.ensure()
+  const app = new FeiqApp({ config: { nick: 'A' }, store })
+  const source = path.join(store.filesDir, 'export-src.jar')
+  fs.writeFileSync(source, 'abc')
+  app.filePaths.set('export-1', source)
+  let target = null
+  try {
+    target = app.exportFile('export-1', 'dsh-feiq-export-test.jar')
+    assert.ok(target.includes('Downloads'))
+    assert.equal(fs.readFileSync(target, 'utf8'), 'abc')
+  } finally {
+    if (target && fs.existsSync(target)) fs.unlinkSync(target)
+  }
+})
+
 test('read receipts never overwrite a pending file offer', () => {
   const store = tempStore('file-offer')
   store.ensure()

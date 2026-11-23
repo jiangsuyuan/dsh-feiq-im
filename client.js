@@ -479,6 +479,18 @@ window.__ModuleLoader__.load({
           .catch(() => {})
       }
 
+      const saveFile = (message) => {
+        post('/api/save', { messageId: message.id, name: message.file?.name || '' })
+          .then((result) => {
+            setToast('已保存到 ' + (result.path || 'Downloads'))
+            setTimeout(() => setToast(''), 5000)
+          })
+          .catch(() => {
+            setToast('保存失败，请查看 debug.log')
+            setTimeout(() => setToast(''), 3000)
+          })
+      }
+
       const transferProgress = (message) => {
         if (message.status !== 'sending' && message.status !== 'receiving') return null
         const progress = message.progress
@@ -664,17 +676,7 @@ window.__ModuleLoader__.load({
                           : message.status === 'failed' || message.status === 'canceled'
                             ? h('button', { className: 'fq-send', onClick: () => post('/api/retry', { convId: active, messageId: message.id }).catch(() => {}) }, '重试')
                             : message.file?.path
-                              ? h(
-                                  'a',
-                                  {
-                                    className: 'fq-send',
-                                    style: { textDecoration: 'none', textAlign: 'center', lineHeight: '30px' },
-                                    href: API + '/api/file?id=' + encodeURIComponent(message.id),
-                                    target: '_blank',
-                                    rel: 'noreferrer',
-                                  },
-                                  '保存',
-                                )
+                              ? h('button', { className: 'fq-send', onClick: () => saveFile(message) }, '保存')
                               : null,
                       )
                     : h('div', { className: 'fq-text' }, message.text)

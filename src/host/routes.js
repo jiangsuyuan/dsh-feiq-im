@@ -190,6 +190,14 @@ export function registerRoutes(ctx, app, { log = () => {} } = {}) {
     fs.createReadStream(file).pipe(res)
   })
 
+  add('exact', '/feiq-im/api/save', async (req, res) => {
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'method not allowed' })
+    const body = await readBody(req)
+    const target = app.exportFile(String(body.messageId ?? ''), String(body.name ?? ''))
+    if (!target) return sendJson(res, 404, { error: 'not found' })
+    return sendJson(res, 200, { path: target })
+  })
+
   add('exact', '/feiq-im/api/refresh', async (req, res) => {
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'method not allowed' })
     return sendJson(res, 200, app.refresh())
