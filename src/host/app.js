@@ -928,6 +928,7 @@ export class FeiqApp extends EventEmitter {
     const host = file.ip || peer?.ip
     const port = file.port || peer?.port || this.port
     if (!host) return null
+    this.debug('acceptFile host=' + host + ':' + port + ' offer=' + file.packetNo + ' fileId=' + file.fileId + ' size=' + file.size)
     message.status = 'receiving'
     message.progress = { done: 0, total: file.size }
     this.emit('message', message)
@@ -947,6 +948,7 @@ export class FeiqApp extends EventEmitter {
     socket.setTimeout(timeout, () => socket.destroy(new Error('timeout')))
     const fail = () => {
       if (message.status === 'received' || message.status === 'canceled') return
+      this.debug('acceptFile failed at ' + received + '/' + file.size)
       message.status = 'failed'
       this.transfers.delete(message.id)
       this.rememberStatus(message)
@@ -957,13 +959,17 @@ export class FeiqApp extends EventEmitter {
     socket.on('data', (chunk) => {
       chunks.push(chunk)
       received += chunk.length
+      if (received === chunk.length) this.debug('acceptFile first chunk=' + chunk.length)
       if (!message.progress || message.progress.done !== received) {
         message.progress = { done: Math.min(received, file.size), total: file.size }
         this.emit('message', message)
       }
       if (received >= file.size) socket.end()
     })
-    socket.on('error', fail)
+    socket.on('error', (error) => {
+      this.debug('acceptFile socket error ' + (error?.message ?? error))
+      fail()
+    })
     socket.on('close', () => {
       if (message.status === 'received' || message.status === 'canceled') return
       const buffer = Buffer.concat(chunks).subarray(0, file.size)
@@ -1053,14 +1059,23 @@ export class FeiqApp extends EventEmitter {
       .filter((message) => !(message.kind === 'text' && isImagePlaceholder(message.text)))
       .map((message) => {
         const patch = this.statuses.get(message.id)
-        if (patch) return { ...message, ...patch }
+        let next = patch ? { ...message, ...patch } : message
         // A "sending" record without a receipt is stale after a restart.
-        if (message.dir === 'out' && message.status === 'sending' && now - (message.ts ?? 0) > 60_000) {
+        if (message.dir === 'out' && next.status === 'sending' && now - (message.ts ?? 0) > 60_000) {
           // A receipt we can no longer verify: do not claim delivered, and do
           // not leave it stuck on "sending" either.
-          return { ...message, status: 'unknown' }
+          next = { ...next, status: 'unknown' }
         }
-        return message
+        // Read receipts used to clobber the file offer state; restore it.
+        if (
+          next.kind === 'file' &&
+          next.dir === 'in' &&
+          !next.file?.path &&
+          (next.status === 'read' || next.status === 'unread')
+        ) {
+          next = { ...next, status: 'offered' }
+        }
+        return next
       })
     this.messages.set(convId, list)
   }
@@ -1123,6 +1138,25 @@ export class FeiqApp extends EventEmitter {
     let sent = 0
     for (const message of list) {
       if (message.dir !== 'in' || message.status === 'read') continue
+      // Files have their own lifecycle (offered -> receiving -> received);
+      // a read receipt must not overwrite it.
+      if (message.kind === 'file') {
+        if (peer && message.packetNo && sent < 50) {
+          this.send(
+            buildPacket({
+              feiqHeader: this.ver,
+              packetNo: String(++this.packetNo),
+              user: this.nick,
+              host: this.hostName,
+              command: COMMAND.READMSG,
+              extra: String(message.packetNo),
+            }),
+            peer,
+          )
+          sent++
+        }
+        continue
+      }
       message.status = 'read'
       this.emit('message', message)
       if (peer && message.packetNo && sent < 50) {

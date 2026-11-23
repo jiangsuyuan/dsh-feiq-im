@@ -633,6 +633,13 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'fq-msgs', ref: scrollRef },
             ...list.map((message) => {
+              const canAcceptFile =
+                message.kind === 'file' &&
+                message.dir === 'in' &&
+                !message.file?.path &&
+                message.status !== 'receiving' &&
+                message.status !== 'failed' &&
+                message.status !== 'canceled'
               const imageSrc =
                 message.kind === 'image'
                   ? API + '/api/image?id=' + encodeURIComponent(message.image?.id ?? '') + '&ext=' + (message.image?.ext ?? 'jpg')
@@ -652,7 +659,7 @@ window.__ModuleLoader__.load({
                         { className: 'fq-file' },
                         h('div', { className: 'fq-file-name' }, message.file?.name || '文件'),
                         h('div', { className: 'fq-meta' }, formatSize(message.file?.size)),
-                        message.dir === 'in' && message.status === 'offered'
+                        canAcceptFile
                           ? h('button', { className: 'fq-send', onClick: () => acceptFileMsg(message.id) }, '接收')
                           : message.status === 'failed' || message.status === 'canceled'
                             ? h('button', { className: 'fq-send', onClick: () => post('/api/retry', { convId: active, messageId: message.id }).catch(() => {}) }, '重试')

@@ -147,6 +147,43 @@ test('TCP file serving accepts a FeiQ-style request without a trailing NUL', asy
   }
 })
 
+test('read receipts never overwrite a pending file offer', () => {
+  const store = tempStore('file-offer')
+  store.ensure()
+  store.appendMessage('B@B-PC', {
+    id: 'f1',
+    convId: 'B@B-PC',
+    peerKey: 'B@B-PC',
+    dir: 'in',
+    kind: 'file',
+    file: { name: 'x.bin', size: 3, fileId: 0, packetNo: '9', ip: '127.0.0.1', port: 2425 },
+    ts: Date.now(),
+    status: 'offered',
+  })
+  const app = new FeiqApp({ config: { nick: 'A' }, store })
+  app.ensureLoaded('B@B-PC')
+  app.markRead('B@B-PC')
+  assert.equal(app.messages.get('B@B-PC')[0].status, 'offered')
+})
+
+test('legacy file offers marked as read are repaired on load', () => {
+  const store = tempStore('file-legacy')
+  store.ensure()
+  store.appendMessage('B@B-PC', {
+    id: 'f2',
+    convId: 'B@B-PC',
+    peerKey: 'B@B-PC',
+    dir: 'in',
+    kind: 'file',
+    file: { name: 'x.bin', size: 3, fileId: 0, packetNo: '9', ip: '127.0.0.1', port: 2425 },
+    ts: Date.now(),
+    status: 'read',
+  })
+  const app = new FeiqApp({ config: { nick: 'A' }, store })
+  app.ensureLoaded('B@B-PC')
+  assert.equal(app.messages.get('B@B-PC')[0].status, 'offered')
+})
+
 test('persisted receipt status overrides a stored "sending" record', () => {
   const store = tempStore('status')
   store.ensure()
