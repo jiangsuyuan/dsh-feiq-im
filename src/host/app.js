@@ -57,6 +57,7 @@ export class FeiqApp extends EventEmitter {
     this.byPacketNo = new Map()
     this.statuses = new Map()
     this.seq = new Map()
+    this.debugFile = this.store?.dir ? path.join(this.store.dir, 'debug.log') : null
     this.pendingImages = new Map()
     this.receiver = new ImageReceiver()
     this.imageSenders = new Map()
@@ -78,6 +79,7 @@ export class FeiqApp extends EventEmitter {
   /* ------------------------------------------------------------------ */
 
   async start() {
+    this.debug('start port=' + this.port + ' nick=' + this.nick + ' avatar=' + this.avatar)
     this.store.ensure()
     this.restore()
     try {
@@ -278,11 +280,32 @@ export class FeiqApp extends EventEmitter {
 
   handlePacket(buffer, rinfo) {
     const packet = parsePacket(buffer, { keepTrailingNuls: true })
-    if (!packet) return
+    if (!packet) {
+      this.debug('udp parse fail len=' + buffer.length + ' from=' + rinfo.address + ' head=' + buffer.subarray(0, 96).toString('hex'))
+      return
+    }
     const selfHeader = packet.header?.[2]
     if (packet.user === this.nick && selfHeader && selfHeader.toUpperCase() === this.mac.toUpperCase()) return
 
     const mode = packet.mode
+    const knownModes = new Set([
+      COMMAND.BR_ENTRY,
+      COMMAND.ANSENTRY,
+      COMMAND.BR_EXIT,
+      COMMAND.SENDMSG,
+      COMMAND.RECVMSG,
+      COMMAND.READMSG,
+      COMMAND.SENDIMAGE,
+      COMMAND.KNOCK,
+      0xd2,
+      0xc1,
+      0xe1,
+    ])
+    if (!knownModes.has(mode) || mode === COMMAND.GETFILEDATA) {
+      this.debug(
+        'udp cmd=0x' + mode.toString(16) + ' len=' + buffer.length + ' from=' + rinfo.address + ' text=' + JSON.stringify(packet.text).slice(0, 100),
+      )
+    }
     if (mode === COMMAND.BR_ENTRY || mode === COMMAND.ANSENTRY) {
       this.upsertPeer(packet, rinfo)
       if (mode === COMMAND.BR_ENTRY) {
@@ -311,7 +334,19 @@ export class FeiqApp extends EventEmitter {
       }
       return
     }
-    if (mode === COMMAND.SENDMSG) return this.onSendMsg(packet, rinfo)
+    if (mode === COMMAND.SENDMSG) {
+      this.debug(
+        'sendmsg from=' +
+          rinfo.address +
+          ' user=' +
+          JSON.stringify(packet.user) +
+          ' cmd=0x' +
+          packet.command.toString(16) +
+          ' len=' +
+          (typeof packet.text === 'string' ? packet.text.length : -1),
+      )
+      return this.onSendMsg(packet, rinfo)
+    }
     if (mode === COMMAND.RECVMSG) return this.onReceipt(packet, 'delivered')
     if (mode === COMMAND.READMSG) return this.onReceipt(packet, 'read')
     if (mode === 0xe1) {
@@ -370,6 +405,8 @@ export class FeiqApp extends EventEmitter {
     peer.port = rinfo.port || this.port
     peer.nick = packet.user
     peer.host = packet.host
+    peer.ver = String(packet.header?.[0] ?? packet.ver ?? '')
+    peer.kind = /_lbt\d/i.test(peer.ver) ? 'feiq' : 'plugin'
     peer.lastSeen = now
     peer.online = true
     // FeiQ puts the display nickname in the extra of ANSENTRY / BR_ENTRY
@@ -406,6 +443,21 @@ export class FeiqApp extends EventEmitter {
     if (changed) this.scheduleState()
   }
 
+  debug(message) {
+    if (!this.debugFile) return
+    try {
+      const stat = fs.statSync(this.debugFile)
+      if (stat.size > 1_000_000) fs.writeFileSync(this.debugFile, '')
+    } catch {
+      /* no file yet */
+    }
+    try {
+      fs.appendFileSync(this.debugFile, new Date().toISOString() + ' ' + message + '\n')
+    } catch {
+      /* ignore */
+    }
+  }
+
   /* ------------------------------------------------------------------ */
   /* text                                                                */
   /* ------------------------------------------------------------------ */
@@ -430,6 +482,7 @@ export class FeiqApp extends EventEmitter {
 
     if ((packet.command & OPTION.FILEATTACH) === OPTION.FILEATTACH && packet.extra.includes(0)) {
       const files = parseFileList(packet.extra)
+      this.debug('incoming file offer from=' + rinfo.address + ' files=' + JSON.stringify(files))
       if (files.length > 0) {
         for (const file of files) {
           const message = {
@@ -749,6 +802,7 @@ export class FeiqApp extends EventEmitter {
 
   /** TCP peer asking for a file we offered: GETFILEDATA (hex fields) + raw body. */
   onTcp(socket) {
+    this.debug('tcp connect from=' + socket.remoteAddress)
     let buffer = Buffer.alloc(0)
     let started = false
     const fail = () => {
@@ -763,16 +817,44 @@ export class FeiqApp extends EventEmitter {
     socket.on('data', (chunk) => {
       if (started) return
       buffer = Buffer.concat([buffer, chunk])
+      this.debug('tcp ' + socket.remoteAddress + ' got=' + chunk.length + ' head=' + buffer.subarray(0, Math.min(buffer.length, 120)).toString('hex'))
       if (buffer.length > 64 * 1024) return fail()
-      if (!buffer.includes(0)) return
+      // FeiQ's TCP GETFILEDATA request has no trailing NUL, unlike UDP
+      // packets. Wait until it looks like a complete `packetNo:fileId:offset:`
+      // triple (or a NUL-terminated standard packet arrives).
+      const nul = buffer.indexOf(0)
+      const raw = nul >= 0 ? buffer.subarray(0, nul) : buffer
+      if (nul < 0) {
+        const text = raw.toString('latin1')
+        const fields = text.split(':')
+        if (!(text.endsWith(':') && fields.length >= 4)) return
+      }
       started = true
-      const packet = parsePacket(buffer.subarray(0, buffer.indexOf(0) + 1), { keepTrailingNuls: true })
-      if (!packet) return fail()
-      const [pHex, fHex, oHex] = String(packet.text).replace(/#.*$/, '').split(':')
-      const key = `${Number.parseInt(pHex, 16)}:${Number.parseInt(fHex, 16)}`
-      const info = this.servedFiles.get(key)
+      const packet = parsePacket(Buffer.concat([raw, Buffer.from([0])]), { keepTrailingNuls: true })
+      let text = packet ? String(packet.text) : raw.toString('latin1')
+      text = text.replace(/#.*$/, '').replace(/\0+$/, '')
+      const parts = text.split(':').filter((part) => part.length > 0)
+      if (parts.length < 2) return fail()
+      const toKey = (a, b) => `${Number.parseInt(a, 16)}:${Number.parseInt(b, 16)}`
+      let key = toKey(parts[0], parts[1])
+      let info = this.servedFiles.get(key)
+      if (!info) {
+        // Tolerate clients that write the three fields in decimal.
+        key = `${Number.parseInt(parts[0], 10)}:${Number.parseInt(parts[1], 10)}`
+        info = this.servedFiles.get(key)
+      }
+      this.debug(
+        'tcp request cmd=' +
+          (packet ? '0x' + packet.command.toString(16) : 'raw') +
+          ' text=' +
+          JSON.stringify(text) +
+          ' key=' +
+          key +
+          ' served=' +
+          JSON.stringify([...this.servedFiles.keys()]),
+      )
       if (!info) return fail()
-      const start = Math.max(0, Number.parseInt(oHex ?? '0', 16) || 0)
+      const start = Math.max(0, Number.parseInt(parts[2] ?? '0', 16) || 0)
       socket.setTimeout(0)
       const stream = fs.createReadStream(info.path, { start })
       stream.on('error', fail)
@@ -800,6 +882,7 @@ export class FeiqApp extends EventEmitter {
       [{ fileId, name: safeName, size: data.length, mtime: Math.floor(Date.now() / 1000), fileType: 1 }],
       { message: '' },
     )
+    this.debug('offer pkt=' + packetNo + ' fileId=' + fileId + ' size=' + data.length + ' extra=' + extra.toString('hex').slice(0, 240))
     const message = {
       id,
       convId: peerKey,

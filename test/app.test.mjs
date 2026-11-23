@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import net from 'node:net'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -118,6 +119,32 @@ test('avatar profile packets are exchanged between plugin peers', () => {
   app.setSettings({ avatar: 'fish-3' })
   assert.equal(app.avatar, 'fish-3')
   assert.equal(app.snapshot().self.avatar, 'fish-3')
+})
+
+test('TCP file serving accepts a FeiQ-style request without a trailing NUL', async () => {
+  const app = new FeiqApp({
+    config: { ipmsgPort: 25281, announceMs: 0, nick: 'A' },
+    store: tempStore('tcp-nul'),
+  })
+  try {
+    await app.start()
+    app.injectPeer({ nick: 'B', host: 'B-PC', ip: '127.0.0.1', port: 25282 })
+    const message = app.sendFile('B@B-PC', 'x.txt', Buffer.from('hello world'))
+    const received = await new Promise((resolve, reject) => {
+      const socket = net.connect({ host: '127.0.0.1', port: 25281 }, () => {
+        const hex = (value) => Number(value).toString(16)
+        socket.write(`${hex(message.file.packetNo)}:${hex(message.file.fileId)}:0:`)
+      })
+      const chunks = []
+      socket.on('data', (chunk) => chunks.push(chunk))
+      socket.on('end', () => resolve(Buffer.concat(chunks).toString()))
+      socket.on('error', reject)
+      setTimeout(() => reject(new Error('file serving timed out')), 3000)
+    })
+    assert.equal(received, 'hello world')
+  } finally {
+    app.stop()
+  }
 })
 
 test('persisted receipt status overrides a stored "sending" record', () => {
