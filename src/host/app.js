@@ -1139,6 +1139,7 @@ export class FeiqApp extends EventEmitter {
     if (process.platform !== 'win32') return this.exportFile(messageId, name)
     if (fs.statSync(source).isDirectory()) {
       const script = [
+        '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
         'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
         '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
         "$dialog.Description = '选择保存文件夹'",
@@ -1165,6 +1166,7 @@ export class FeiqApp extends EventEmitter {
     }
     const safeName = path.basename(String(name || path.basename(source))) || 'file.bin'
     const script = [
+      '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
       'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
       '$dialog = New-Object System.Windows.Forms.SaveFileDialog',
       "$dialog.InitialDirectory = [Environment]::GetFolderPath('Downloads')",
