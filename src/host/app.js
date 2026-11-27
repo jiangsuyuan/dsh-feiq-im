@@ -3,6 +3,7 @@
  * receipts over IPMsg UDP 2425. Transport-agnostic enough to be driven by the
  * DSH Web routes and by tests (handlePacket is public).
  */
+import { execFile } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import net from 'node:net'
@@ -1048,6 +1049,55 @@ export class FeiqApp extends EventEmitter {
     }
     fs.copyFileSync(source, target)
     return target
+  }
+
+  /** Ask for a destination with the native save dialog, then copy there. */
+  async saveFileAs(messageId, name) {
+    const source = this.filePathFor(messageId)
+    if (!source || !fs.existsSync(source)) return null
+    if (process.platform !== 'win32') return this.exportFile(messageId, name)
+    const safeName = path.basename(String(name || path.basename(source))) || 'file.bin'
+    const script = [
+      'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
+      '$dialog = New-Object System.Windows.Forms.SaveFileDialog',
+      "$dialog.InitialDirectory = [Environment]::GetFolderPath('Downloads')",
+      '$dialog.FileName = $env:FEIQ_SAVE_NAME',
+      "$dialog.Title = '另存为'",
+      "if ($dialog.ShowDialog() -eq 'OK') { [Console]::Out.Write($dialog.FileName) }",
+    ].join('; ')
+    const target = await new Promise((resolve) => {
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-STA', '-Command', script],
+        { env: { ...process.env, FEIQ_SAVE_NAME: safeName }, timeout: 180000, windowsHide: true },
+        (error, stdout) => {
+          const picked = String(stdout || '').trim()
+          if (error || !picked) return resolve(null)
+          resolve(picked)
+        },
+      )
+    })
+    if (!target) return null
+    try {
+      fs.copyFileSync(source, target)
+    } catch {
+      return null
+    }
+    return target
+  }
+
+  /** Open the OS file manager with this file selected. */
+  revealFile(messageId) {
+    const source = this.filePathFor(messageId)
+    if (!source || !fs.existsSync(source)) return null
+    try {
+      if (process.platform === 'win32') execFile('explorer.exe', ['/select,' + source], () => {})
+      else if (process.platform === 'darwin') execFile('open', ['-R', source], () => {})
+      else execFile('xdg-open', [path.dirname(source)], () => {})
+    } catch {
+      /* best effort */
+    }
+    return source
   }
 
   /* ------------------------------------------------------------------ */

@@ -511,6 +511,36 @@ window.__ModuleLoader__.load({
           })
       }
 
+      const revealFile = (message) => {
+        post('/api/reveal', { messageId: message.id })
+          .then(() => {
+            setToast('已在文件管理器中打开')
+            setTimeout(() => setToast(''), 2500)
+          })
+          .catch(() => {
+            setToast('打开文件夹失败')
+            setTimeout(() => setToast(''), 2500)
+          })
+      }
+
+      const saveFileAs = (message) => {
+        setToast('请在系统对话框中选择保存位置…')
+        post('/api/save-as', { messageId: message.id, name: message.file?.name || '' })
+          .then((result) => {
+            if (result.path) {
+              setToast('已另存为 ' + result.path)
+              setTimeout(() => setToast(''), 5000)
+            } else {
+              setToast('已取消')
+              setTimeout(() => setToast(''), 2000)
+            }
+          })
+          .catch(() => {
+            setToast('另存为失败')
+            setTimeout(() => setToast(''), 3000)
+          })
+      }
+
       const transferProgress = (message) => {
         if (message.status !== 'sending' && message.status !== 'receiving') return null
         const progress = message.progress
@@ -696,7 +726,13 @@ window.__ModuleLoader__.load({
                           : message.status === 'failed' || message.status === 'canceled'
                             ? h('button', { className: 'fq-send', onClick: () => post('/api/retry', { convId: active, messageId: message.id }).catch(() => {}) }, '重试')
                             : message.file?.path
-                              ? h('button', { className: 'fq-send', onClick: () => saveFile(message) }, '保存')
+                              ? h(
+                                  'div',
+                                  { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
+                                  h('button', { className: 'fq-send', style: { flex: '1 1 90px' }, onClick: () => saveFile(message) }, '保存'),
+                                  h('button', { className: 'fq-linkbtn', onClick: () => saveFileAs(message) }, '另存为…'),
+                                  h('button', { className: 'fq-linkbtn', onClick: () => revealFile(message) }, '打开文件夹'),
+                                )
                               : null,
                       )
                     : h('div', { className: 'fq-text' }, message.text)
@@ -771,7 +807,28 @@ window.__ModuleLoader__.load({
               placeholder: 'Enter 发送，Shift+Enter 换行',
               onChange: (event) => setDraft(event.target.value),
               onPaste: (event) => {
-                const items = event.clipboardData?.items ?? []
+                const files = [...(event.clipboardData?.files ?? [])]
+                if (files.length) {
+                  event.preventDefault()
+                  for (const file of files) {
+                    if (file.type && file.type.startsWith('image/')) sendImage(file)
+                    else sendFile(file)
+                  }
+                  return
+                }
+                const items = [...(event.clipboardData?.items ?? [])]
+                const dropped = items
+                  .filter((item) => item.kind === 'file')
+                  .map((item) => item.getAsFile())
+                  .filter(Boolean)
+                if (dropped.length) {
+                  event.preventDefault()
+                  for (const file of dropped) {
+                    if (file.type && file.type.startsWith('image/')) sendImage(file)
+                    else sendFile(file)
+                  }
+                  return
+                }
                 for (const item of items) {
                   if (item.type && item.type.startsWith('image/')) {
                     const file = item.getAsFile()
