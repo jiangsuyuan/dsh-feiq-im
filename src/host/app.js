@@ -485,21 +485,27 @@ export class FeiqApp extends EventEmitter {
       const files = parseFileList(packet.extra)
       this.debug('incoming file offer from=' + rinfo.address + ' files=' + JSON.stringify(files))
       if (files.length > 0) {
-        for (const file of files) {
-          const message = {
-            id: randomUUID(),
-            convId: key,
-            peerKey: key,
-            dir: 'in',
-            kind: 'file',
-            file: { ...file, packetNo: packet.packetNo, ip: rinfo.address, port: rinfo.port || this.port },
-            ts: Date.now(),
-            status: 'offered',
-          }
-          this.pushMessage(message)
-          const conv = this.convs.get(key)
-          if (conv) conv.unread = (conv.unread || 0) + 1
+        const entries = files.map((file) => ({
+          ...file,
+          packetNo: packet.packetNo,
+          ip: rinfo.address,
+          port: rinfo.port || this.port,
+        }))
+        const message = {
+          id: randomUUID(),
+          convId: key,
+          peerKey: key,
+          dir: 'in',
+          kind: 'file',
+          files: entries,
+          batch: entries.length > 1,
+          file: entries[0],
+          ts: Date.now(),
+          status: 'offered',
         }
+        this.pushMessage(message)
+        const conv = this.convs.get(key)
+        if (conv) conv.unread = (conv.unread || 0) + 1
         this.scheduleState()
         if (packet.command & OPTION.SENDCHECK) this.ackReceive(rinfo, packet.packetNo)
         return
@@ -924,32 +930,31 @@ export class FeiqApp extends EventEmitter {
     const message = (this.messages.get(convId) ?? []).find((item) => item.id === messageId)
     if (!message || message.kind !== 'file') return null
     if (message.status === 'received' || message.status === 'receiving') return message
-    const file = message.file
+    const entries = message.files?.length ? message.files : [message.file]
+    if (!entries.length) return null
     const peer = this.peers.get(message.peerKey)
-    const host = file.ip || peer?.ip
-    const port = file.port || peer?.port || this.port
+    const host = entries[0].ip || peer?.ip
+    const port = entries[0].port || peer?.port || this.port
     if (!host) return null
-    this.debug('acceptFile host=' + host + ':' + port + ' offer=' + file.packetNo + ' fileId=' + file.fileId + ' size=' + file.size)
+    const total = entries.reduce((sum, entry) => sum + (entry.size || 0), 0)
+    const batch = entries.length > 1
+    const targetDir = batch ? path.join(this.store.filesDir, message.id) : null
+    if (targetDir) {
+      try {
+        fs.mkdirSync(targetDir, { recursive: true })
+      } catch {
+        return null
+      }
+    }
+    this.debug('acceptFile host=' + host + ':' + port + ' files=' + entries.length + ' total=' + total)
     message.status = 'receiving'
-    message.progress = { done: 0, total: file.size }
+    message.progress = { done: 0, total }
     this.emit('message', message)
-    const chunks = []
-    let received = 0
-    const socket = net.connect({ host, port })
-    const request = buildFileRequestPacket({
-      requestPacketNo: String(++this.packetNo),
-      offerPacketNo: file.packetNo,
-      fileId: file.fileId,
-      offset: 0,
-      user: this.nick,
-      host: this.hostName,
-    })
-    socket.write(request)
-    const timeout = Math.max(20_000, Math.ceil(file.size / (1024 * 1024)) * 10_000)
-    socket.setTimeout(timeout, () => socket.destroy(new Error('timeout')))
+    let current = null
+    let done = 0
     const fail = () => {
       if (message.status === 'received' || message.status === 'canceled') return
-      this.debug('acceptFile failed at ' + received + '/' + file.size)
+      this.debug('acceptFile failed at ' + done + '/' + total)
       message.status = 'failed'
       this.transfers.delete(message.id)
       this.rememberStatus(message)
@@ -957,40 +962,90 @@ export class FeiqApp extends EventEmitter {
       this.scheduleState()
       this.persist()
     }
-    socket.on('data', (chunk) => {
-      chunks.push(chunk)
-      received += chunk.length
-      if (received === chunk.length) this.debug('acceptFile first chunk=' + chunk.length)
-      if (!message.progress || message.progress.done !== received) {
-        message.progress = { done: Math.min(received, file.size), total: file.size }
-        this.emit('message', message)
+    const saveBuffer = (entry, buffer) => {
+      if (targetDir) {
+        const name =
+          path.basename(String(entry.name || 'file.bin')).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_') || 'file.bin'
+        const ext = path.extname(name)
+        const stem = path.basename(name, ext)
+        let target = path.join(targetDir, name)
+        let index = 1
+        while (fs.existsSync(target)) {
+          target = path.join(targetDir, stem + ' (' + index + ')' + ext)
+          index += 1
+        }
+        fs.writeFileSync(target, buffer)
+        entry.path = target
+        return target
       }
-      if (received >= file.size) socket.end()
-    })
-    socket.on('error', (error) => {
-      this.debug('acceptFile socket error ' + (error?.message ?? error))
-      fail()
-    })
-    socket.on('close', () => {
-      if (message.status === 'received' || message.status === 'canceled') return
-      const buffer = Buffer.concat(chunks).subarray(0, file.size)
-      if (buffer.length !== file.size || buffer.length === 0) return fail()
-      const saved = this.store.saveImage(message.id, this.fileExtension(file.name), buffer)
+      const saved = this.store.saveImage(message.id, this.fileExtension(entry.name), buffer)
+      entry.path = saved
       message.file.path = saved
-      message.progress = { done: buffer.length, total: file.size }
-      this.filePaths.set(message.id, saved)
-      message.status = 'received'
-      this.transfers.delete(message.id)
-      this.rememberStatus(message)
-      this.emit('message', message)
-      this.scheduleState()
-      this.persist()
-    })
+      return saved
+    }
+    const next = (index) => {
+      if (index >= entries.length) {
+        if (message.status === 'canceled') return
+        message.status = 'received'
+        message.progress = { done: total, total }
+        if (targetDir) message.dirPath = targetDir
+        this.filePaths.set(message.id, targetDir ?? message.file.path)
+        this.transfers.delete(message.id)
+        this.rememberStatus(message)
+        this.emit('message', message)
+        this.scheduleState()
+        this.persist()
+        return
+      }
+      const entry = entries[index]
+      const chunks = []
+      let received = 0
+      const socket = net.connect({ host, port })
+      current = socket
+      const request = buildFileRequestPacket({
+        requestPacketNo: String(++this.packetNo),
+        offerPacketNo: entry.packetNo,
+        fileId: entry.fileId,
+        offset: 0,
+        user: this.nick,
+        host: this.hostName,
+      })
+      socket.write(request)
+      const timeout = Math.max(20_000, Math.ceil((entry.size || 0) / (1024 * 1024)) * 10_000)
+      socket.setTimeout(timeout, () => socket.destroy(new Error('timeout')))
+      socket.on('data', (chunk) => {
+        chunks.push(chunk)
+        received += chunk.length
+        if (!message.progress || message.progress.done !== done + received) {
+          message.progress = { done: Math.min(done + received, total), total }
+          this.emit('message', message)
+        }
+        if (received >= entry.size) socket.end()
+      })
+      socket.on('error', (error) => {
+        this.debug('acceptFile socket error ' + (error?.message ?? error))
+        fail()
+      })
+      socket.on('close', () => {
+        if (message.status === 'received' || message.status === 'canceled' || message.status === 'failed') return
+        const buffer = Buffer.concat(chunks).subarray(0, entry.size)
+        if (buffer.length !== entry.size || buffer.length === 0) return fail()
+        try {
+          saveBuffer(entry, buffer)
+        } catch {
+          return fail()
+        }
+        done += entry.size
+        message.progress = { done, total }
+        this.emit('message', message)
+        next(index + 1)
+      })
+    }
     this.transfers.set(message.id, {
       kind: 'file',
       stop: () => {
         try {
-          socket.destroy()
+          current?.destroy()
         } catch {
           /* ignore */
         }
@@ -1003,6 +1058,7 @@ export class FeiqApp extends EventEmitter {
         this.persist()
       },
     })
+    next(0)
     return message
   }
 
@@ -1029,12 +1085,23 @@ export class FeiqApp extends EventEmitter {
     return this.filePaths.get(messageId) ?? null
   }
 
-  /** Copy a received file into the OS Downloads folder so the browser can just say where it went. */
+  /** Copy a received file (or batch folder) into the OS Downloads folder. */
   exportFile(messageId, name) {
     const source = this.filePathFor(messageId)
     if (!source || !fs.existsSync(source)) return null
     const downloads = path.join(os.homedir(), 'Downloads')
     fs.mkdirSync(downloads, { recursive: true })
+    if (fs.statSync(source).isDirectory()) {
+      const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
+      let target = path.join(downloads, '批量文件-' + stamp)
+      let index = 1
+      while (fs.existsSync(target)) {
+        target = path.join(downloads, '批量文件-' + stamp + '-' + index)
+        index += 1
+      }
+      fs.cpSync(source, target, { recursive: true })
+      return target
+    }
     const base = path
       .basename(String(name || path.basename(source)))
       .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
@@ -1051,11 +1118,51 @@ export class FeiqApp extends EventEmitter {
     return target
   }
 
-  /** Ask for a destination with the native save dialog, then copy there. */
+  runPowerShell(script, extraEnv = {}) {
+    return new Promise((resolve) => {
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-STA', '-Command', script],
+        { env: { ...process.env, ...extraEnv }, timeout: 180000, windowsHide: true },
+        (error, stdout) => {
+          const picked = String(stdout || '').trim()
+          resolve(error || !picked ? null : picked)
+        },
+      )
+    })
+  }
+
+  /** Ask for a destination with the native dialog, then copy there. */
   async saveFileAs(messageId, name) {
     const source = this.filePathFor(messageId)
     if (!source || !fs.existsSync(source)) return null
     if (process.platform !== 'win32') return this.exportFile(messageId, name)
+    if (fs.statSync(source).isDirectory()) {
+      const script = [
+        'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
+        '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
+        "$dialog.Description = '选择保存文件夹'",
+        "$dialog.SelectedPath = [Environment]::GetFolderPath('Downloads')",
+        "if ($dialog.ShowDialog() -eq 'OK') { [Console]::Out.Write($dialog.SelectedPath) }",
+      ].join('; ')
+      const picked = await this.runPowerShell(script)
+      if (!picked) return null
+      fs.mkdirSync(picked, { recursive: true })
+      for (const entry of fs.readdirSync(source)) {
+        const from = path.join(source, entry)
+        if (!fs.statSync(from).isFile()) continue
+        const ext = path.extname(entry)
+        const stem = path.basename(entry, ext)
+        let target = path.join(picked, entry)
+        let index = 1
+        while (fs.existsSync(target)) {
+          target = path.join(picked, stem + ' (' + index + ')' + ext)
+          index += 1
+        }
+        fs.copyFileSync(from, target)
+      }
+      return picked
+    }
     const safeName = path.basename(String(name || path.basename(source))) || 'file.bin'
     const script = [
       'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
@@ -1065,18 +1172,7 @@ export class FeiqApp extends EventEmitter {
       "$dialog.Title = '另存为'",
       "if ($dialog.ShowDialog() -eq 'OK') { [Console]::Out.Write($dialog.FileName) }",
     ].join('; ')
-    const target = await new Promise((resolve) => {
-      execFile(
-        'powershell.exe',
-        ['-NoProfile', '-STA', '-Command', script],
-        { env: { ...process.env, FEIQ_SAVE_NAME: safeName }, timeout: 180000, windowsHide: true },
-        (error, stdout) => {
-          const picked = String(stdout || '').trim()
-          if (error || !picked) return resolve(null)
-          resolve(picked)
-        },
-      )
-    })
+    const target = await this.runPowerShell(script, { FEIQ_SAVE_NAME: safeName })
     if (!target) return null
     try {
       fs.copyFileSync(source, target)
@@ -1091,6 +1187,12 @@ export class FeiqApp extends EventEmitter {
     const source = this.filePathFor(messageId)
     if (!source || !fs.existsSync(source)) return null
     try {
+      if (fs.statSync(source).isDirectory()) {
+        if (process.platform === 'win32') execFile('explorer.exe', [source], () => {})
+        else if (process.platform === 'darwin') execFile('open', [source], () => {})
+        else execFile('xdg-open', [source], () => {})
+        return source
+      }
       if (process.platform === 'win32') execFile('explorer.exe', ['/select,' + source], () => {})
       else if (process.platform === 'darwin') execFile('open', ['-R', source], () => {})
       else execFile('xdg-open', [path.dirname(source)], () => {})
@@ -1146,6 +1248,10 @@ export class FeiqApp extends EventEmitter {
           (next.status === 'read' || next.status === 'unread')
         ) {
           next = { ...next, status: 'offered' }
+        }
+        if (next.kind === 'file') {
+          const stored = next.dirPath || next.file?.path
+          if (stored) this.filePaths.set(next.id, stored)
         }
         return next
       })

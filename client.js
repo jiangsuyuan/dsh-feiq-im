@@ -695,10 +695,21 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'fq-msgs', ref: scrollRef },
             ...list.map((message) => {
+              const fileEntries =
+                message.kind === 'file'
+                  ? message.files?.length
+                    ? message.files
+                    : message.file
+                      ? [message.file]
+                      : []
+                  : []
+              const fileCount = fileEntries.length
+              const totalSize = fileEntries.reduce((sum, item) => sum + (item.size || 0), 0)
+              const storedPath = message.dirPath || message.file?.path
               const canAcceptFile =
                 message.kind === 'file' &&
                 message.dir === 'in' &&
-                !message.file?.path &&
+                !storedPath &&
                 message.status !== 'receiving' &&
                 message.status !== 'failed' &&
                 message.status !== 'canceled'
@@ -719,13 +730,16 @@ window.__ModuleLoader__.load({
                     ? h(
                         'div',
                         { className: 'fq-file' },
-                        h('div', { className: 'fq-file-name' }, message.file?.name || '文件'),
-                        h('div', { className: 'fq-meta' }, formatSize(message.file?.size)),
+                        h('div', { className: 'fq-file-name' }, fileCount > 1 ? fileCount + ' 个文件' : message.file?.name || '文件'),
+                        fileCount > 1
+                          ? h('div', { className: 'fq-meta' }, fileEntries.slice(0, 3).map((item) => item.name).join('、') + (fileCount > 3 ? ' 等' : ''))
+                          : null,
+                        h('div', { className: 'fq-meta' }, formatSize(totalSize)),
                         canAcceptFile
                           ? h('button', { className: 'fq-send', onClick: () => acceptFileMsg(message.id) }, '接收')
                           : message.status === 'failed' || message.status === 'canceled'
                             ? h('button', { className: 'fq-send', onClick: () => post('/api/retry', { convId: active, messageId: message.id }).catch(() => {}) }, '重试')
-                            : message.file?.path
+                            : storedPath
                               ? h(
                                   'div',
                                   { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },

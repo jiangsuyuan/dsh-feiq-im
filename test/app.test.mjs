@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import dgram from 'node:dgram'
 import net from 'node:net'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -7,7 +8,7 @@ import path from 'node:path'
 
 import { Store } from '../src/host/store.js'
 import { FeiqApp } from '../src/host/app.js'
-import { COMMAND, buildPacket, parsePacket } from '../src/host/ipmsg.js'
+import { COMMAND, OPTION, buildFileAttachExtra, buildPacket, parsePacket } from '../src/host/ipmsg.js'
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -161,6 +162,60 @@ test('exportFile copies a received file into Downloads', () => {
     assert.equal(fs.readFileSync(target, 'utf8'), 'abc')
   } finally {
     if (target && fs.existsSync(target)) fs.unlinkSync(target)
+  }
+})
+
+test('a batch file offer becomes one message and one folder', async () => {
+  const app = new FeiqApp({ config: { ipmsgPort: 25293, announceMs: 0, nick: 'A' }, store: tempStore('batch') })
+  const fakePort = 25294
+  const payloads = { 0: 'hello', 1: 'goodbye' }
+  const tcp = net.createServer((socket) => {
+    socket.on('data', (buffer) => {
+      const packet = parsePacket(buffer)
+      const parts = packet ? String(packet.text).split(':') : []
+      const fileId = Number.parseInt(parts[1] ?? '-1', 16)
+      socket.end(payloads[fileId] ?? '')
+    })
+  })
+  await new Promise((resolve) => tcp.listen(fakePort, '0.0.0.0', resolve))
+  const udp = dgram.createSocket('udp4')
+  await new Promise((resolve) => udp.bind(fakePort, '0.0.0.0', resolve))
+  try {
+    await app.start()
+    const extra = buildFileAttachExtra(
+      [
+        { fileId: 0, name: 'a.txt', size: 5, mtime: 0, fileType: 1 },
+        { fileId: 1, name: 'b.txt', size: 7, mtime: 0, fileType: 1 },
+      ],
+      { message: '' },
+    )
+    const offer = buildPacket({
+      feiqHeader: '1_lbt6_0#128#001122334455#0#0#0#4001#9',
+      packetNo: '7000',
+      user: 'fake',
+      host: 'FAKE-PC',
+      command: COMMAND.SENDMSG | OPTION.FILEATTACH | OPTION.SENDCHECK,
+      extraBuffer: extra,
+    })
+    udp.send(offer, 25293, '127.0.0.1')
+    await new Promise((resolve) => setTimeout(resolve, 800))
+    app.ensureLoaded('fake@FAKE-PC')
+    const message = (app.messages.get('fake@FAKE-PC') ?? []).find((item) => item.kind === 'file')
+    assert.equal(message.files.length, 2)
+    assert.equal(message.batch, true)
+    app.acceptFile('fake@FAKE-PC', message.id)
+    for (let i = 0; i < 50 && message.status !== 'received' && message.status !== 'failed'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    assert.equal(message.status, 'received')
+    assert.ok(fs.existsSync(message.dirPath))
+    assert.equal(fs.readFileSync(path.join(message.dirPath, 'a.txt'), 'utf8'), 'hello')
+    assert.equal(fs.readFileSync(path.join(message.dirPath, 'b.txt'), 'utf8'), 'goodbye')
+    assert.equal(message.progress.done, 12)
+  } finally {
+    app.stop()
+    tcp.close()
+    udp.close()
   }
 })
 
